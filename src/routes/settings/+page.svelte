@@ -1,0 +1,275 @@
+<script lang="ts">
+	import { settings, save } from '$lib/settings.svelte';
+	import { testConnection, createTable } from '$lib/db.client';
+
+	let saved = $state(false);
+	let dbBusy = $state(false);
+	let dbMsg = $state('');
+	let aiTesting = $state(false);
+	let aiMsg = $state('');
+
+	function persist() {
+		save();
+		saved = true;
+		setTimeout(() => (saved = false), 1500);
+	}
+
+	async function testDb() {
+		save();
+		dbBusy = true;
+		dbMsg = '';
+		const r = await testConnection(settings.dbUrl, settings.dbTable);
+		dbMsg = r.ok ? `✓ Connected — ${r.count} word(s) in “${settings.dbTable}”.` : `✗ ${r.error}`;
+		dbBusy = false;
+	}
+
+	async function initDb() {
+		save();
+		dbBusy = true;
+		dbMsg = '';
+		try {
+			await createTable(settings.dbUrl, settings.dbTable);
+			dbMsg = `✓ Table “${settings.dbTable}” is ready.`;
+		} catch (e) {
+			dbMsg = `✗ ${(e as Error).message}`;
+		}
+		dbBusy = false;
+	}
+
+	async function testAi() {
+		save();
+		aiTesting = true;
+		aiMsg = '';
+		try {
+			const res = await fetch('/api/generate', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ config: { ...settings.ai }, word: 'serendipity' })
+			});
+			const b = await res.json();
+			aiMsg = res.ok ? '✓ Working — connection good.' : `✗ ${b.error ?? 'failed'}`;
+		} catch (e) {
+			aiMsg = `✗ ${(e as Error).message}`;
+		} finally {
+			aiTesting = false;
+		}
+	}
+</script>
+
+<svelte:head><title>Settings · Gapfill</title></svelte:head>
+
+<div class="page">
+	<h1>Settings</h1>
+
+	<p class="warn">
+		Everything here is stored only in <strong>this browser</strong>. Your database connection talks
+		straight to Neon and never reaches this app's server. Azure & AI keys are proxied (for CORS) but
+		never stored. Treat it like a password manager — keep it to devices you trust.
+	</p>
+
+	<section>
+		<h2>Database (Neon)</h2>
+		<label>
+			<span>Connection string</span>
+			<input
+				bind:value={settings.dbUrl}
+				type="password"
+				placeholder="postgresql://user:pass@host/db?sslmode=require"
+				autocapitalize="none"
+				autocorrect="off"
+				autocomplete="off"
+				spellcheck="false"
+			/>
+		</label>
+		<label>
+			<span>Table name</span>
+			<input bind:value={settings.dbTable} autocapitalize="none" autocorrect="off" spellcheck="false" />
+		</label>
+		<div class="row">
+			<button class="ghost" onclick={testDb} disabled={dbBusy || !settings.dbUrl}>Test connection</button>
+			<button class="ghost" onclick={initDb} disabled={dbBusy || !settings.dbUrl}>
+				Create table
+			</button>
+		</div>
+		{#if dbMsg}<p class="status" class:ok={dbMsg.startsWith('✓')}>{dbMsg}</p>{/if}
+		<p class="hint">
+			New database? Paste the string and hit <strong>Create table</strong>. Tip: for safety, use a
+			Postgres role limited to this table rather than your admin string.
+		</p>
+	</section>
+
+	<section>
+		<h2>Pronunciation (Azure Speech)</h2>
+		<label>
+			<span>Key</span>
+			<input
+				bind:value={settings.azureKey}
+				type="password"
+				placeholder="Azure Speech key"
+				autocapitalize="none"
+				autocorrect="off"
+				autocomplete="off"
+				spellcheck="false"
+			/>
+		</label>
+		<label>
+			<span>Region</span>
+			<input
+				bind:value={settings.azureRegion}
+				placeholder="eastus"
+				autocapitalize="none"
+				autocorrect="off"
+				spellcheck="false"
+			/>
+		</label>
+	</section>
+
+	<section>
+		<h2>AI generation</h2>
+		<p class="hint">Any OpenAI-compatible endpoint (OpenAI, OpenRouter, a local Ollama, …).</p>
+		<label>
+			<span>Base URL</span>
+			<input
+				bind:value={settings.ai.baseUrl}
+				placeholder="https://api.openai.com/v1"
+				autocapitalize="none"
+				autocorrect="off"
+				autocomplete="off"
+				spellcheck="false"
+			/>
+		</label>
+		<label>
+			<span>API key</span>
+			<input
+				bind:value={settings.ai.apiKey}
+				type="password"
+				placeholder="sk-…"
+				autocapitalize="none"
+				autocorrect="off"
+				autocomplete="off"
+				spellcheck="false"
+			/>
+		</label>
+		<label>
+			<span>Model</span>
+			<input bind:value={settings.ai.model} placeholder="gpt-4o-mini" autocapitalize="none" autocorrect="off" spellcheck="false" />
+		</label>
+		<div class="row">
+			<button class="ghost" onclick={testAi} disabled={aiTesting}>{aiTesting ? 'Testing…' : 'Test'}</button>
+		</div>
+		{#if aiMsg}<p class="status" class:ok={aiMsg.startsWith('✓')}>{aiMsg}</p>{/if}
+	</section>
+
+	<div class="savebar">
+		<button class="primary" onclick={persist}>{saved ? 'Saved ✓' : 'Save'}</button>
+	</div>
+</div>
+
+<style>
+	.page {
+		padding: 8px 0 48px;
+		display: flex;
+		flex-direction: column;
+		gap: 28px;
+	}
+	h1 {
+		font-family: var(--serif);
+		font-size: 30px;
+		margin: 8px 0 0;
+	}
+	.warn {
+		margin: 0;
+		font-size: 13px;
+		line-height: 1.55;
+		color: var(--muted);
+		border: 1px solid var(--line);
+		border-radius: 12px;
+		padding: 12px 14px;
+	}
+	.warn strong {
+		color: var(--ink);
+	}
+	section {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+	}
+	h2 {
+		font-size: 13px;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: var(--muted);
+		margin: 0;
+	}
+	.hint {
+		font-size: 13px;
+		color: var(--muted);
+		margin: 0;
+		line-height: 1.5;
+	}
+	.hint strong {
+		color: var(--ink);
+	}
+	label {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+	label span {
+		font-size: 13px;
+		color: var(--muted);
+	}
+	input {
+		padding: 13px 15px;
+		border: 1.5px solid var(--line);
+		border-radius: 13px;
+		background: var(--panel);
+		color: var(--ink);
+		outline: none;
+	}
+	input:focus {
+		border-color: color-mix(in srgb, var(--ink) 45%, var(--line));
+	}
+	.row {
+		display: flex;
+		gap: 10px;
+		flex-wrap: wrap;
+		margin-top: 2px;
+	}
+	.primary {
+		padding: 14px 28px;
+		border-radius: 13px;
+		background: var(--ink);
+		color: var(--bg);
+		font-weight: 600;
+	}
+	.ghost {
+		padding: 12px 18px;
+		border-radius: 13px;
+		border: 1.5px solid var(--line);
+		color: var(--ink);
+	}
+	.ghost:disabled {
+		opacity: 0.45;
+	}
+	.status {
+		font-size: 14px;
+		color: var(--muted);
+		margin: 0;
+		line-height: 1.5;
+		word-break: break-word;
+	}
+	.status.ok {
+		color: var(--ok);
+	}
+	.savebar {
+		position: sticky;
+		bottom: 0;
+		padding: 12px 0 calc(12px + var(--safe-bottom));
+		background: linear-gradient(transparent, var(--bg) 30%);
+		display: flex;
+	}
+	.savebar .primary {
+		flex: 1;
+	}
+</style>

@@ -1,0 +1,27 @@
+{
+  "name": "gapfill",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "prepare": "svelte-kit sync",
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-auto": "7.0.1",
+    "@sveltejs/kit": "2.67.0",
+    "@sveltejs/vite-plugin-svelte": "7.1.2",
+    "@vite-pwa/sveltekit": "1.1.0",
+    "svelte": "5.56.4",
+    "svelte-check": "4.7.0",
+    "typescript": "6.0.3",
+    "vite": "8.1.0"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "1.1.0"
+  }
+}
