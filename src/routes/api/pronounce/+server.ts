@@ -4,7 +4,15 @@ import type { RequestHandler } from './$types';
 /** Azure Speech pronunciation assessment over the short-audio REST endpoint.
  * The user's key/region arrive with the request (BYO) — proxied for CORS,
  * never stored or logged. Receives a 16 kHz mono WAV + reference text. */
-export const POST: RequestHandler = async ({ request }) => {
+/** Azure puts scores either nested under `PronunciationAssessment` or directly
+ * on the word/phoneme object, depending on the response. Read both. */
+function num(...vals: unknown[]): number | null {
+	for (const v of vals) if (typeof v === 'number') return v;
+	return null;
+}
+
+export const POST: RequestHandler = async ({ request, url }) => {
+	const debug = url.searchParams.get('debug') === '1';
 	const form = await request.formData().catch(() => null);
 	const key = String(form?.get('key') ?? '').trim();
 	const region = String(form?.get('region') ?? 'eastus').trim() || 'eastus';
@@ -29,12 +37,12 @@ export const POST: RequestHandler = async ({ request }) => {
 	};
 	const paHeader = btoa(unescape(encodeURIComponent(JSON.stringify(params))));
 
-	const url = `https://${region}.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1?language=en-US&format=detailed`;
+	const endpoint = `https://${region}.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1?language=en-US&format=detailed`;
 	const body = await audio.arrayBuffer();
 
 	let res: Response;
 	try {
-		res = await fetch(url, {
+		res = await fetch(endpoint, {
 			method: 'POST',
 			headers: {
 				'Ocp-Apim-Subscription-Key': key,
@@ -64,40 +72,34 @@ export const POST: RequestHandler = async ({ request }) => {
 		return json({ error: msg }, { status: 200 });
 	}
 
+	/* eslint-disable @typescript-eslint/no-explicit-any */
 	const pa = nb.PronunciationAssessment ?? {};
-	type AzPhoneme = {
-		Phoneme: string;
-		PronunciationAssessment?: {
-			AccuracyScore?: number;
-			NBestPhonemes?: Array<{ Phoneme: string; Score: number }>;
+	const words = ((nb.Words ?? []) as any[]).map((w) => {
+		const wpa = w.PronunciationAssessment ?? {};
+		return {
+			word: w.Word,
+			accuracy: num(wpa.AccuracyScore, w.AccuracyScore),
+			errorType: wpa.ErrorType ?? w.ErrorType ?? 'None',
+			phonemes: ((w.Phonemes ?? []) as any[]).map((p) => {
+				const ppa = p.PronunciationAssessment ?? {};
+				const nbest = (ppa.NBestPhonemes ?? p.NBestPhonemes ?? []) as any[];
+				return {
+					phoneme: p.Phoneme,
+					accuracy: num(ppa.AccuracyScore, p.AccuracyScore),
+					nbest: nbest.map((n) => ({ phoneme: n.Phoneme, score: n.Score }))
+				};
+			})
 		};
-	};
-	type AzWord = {
-		Word: string;
-		PronunciationAssessment?: { AccuracyScore?: number; ErrorType?: string };
-		Phonemes?: AzPhoneme[];
-	};
-	const words = ((nb.Words ?? []) as AzWord[]).map((w) => ({
-		word: w.Word,
-		accuracy: w.PronunciationAssessment?.AccuracyScore ?? null,
-		errorType: w.PronunciationAssessment?.ErrorType ?? 'None',
-		phonemes: (w.Phonemes ?? []).map((p) => ({
-			phoneme: p.Phoneme,
-			accuracy: p.PronunciationAssessment?.AccuracyScore ?? null,
-			nbest: (p.PronunciationAssessment?.NBestPhonemes ?? []).map((n) => ({
-				phoneme: n.Phoneme,
-				score: n.Score
-			}))
-		}))
-	}));
+	});
 
 	return json({
 		recognized: nb.Display ?? nb.Lexical ?? '',
-		accuracy: pa.AccuracyScore ?? null,
-		fluency: pa.FluencyScore ?? null,
-		completeness: pa.CompletenessScore ?? null,
-		prosody: pa.ProsodyScore ?? null,
-		pron: pa.PronScore ?? null,
-		words
+		accuracy: num(pa.AccuracyScore, nb.AccuracyScore),
+		fluency: num(pa.FluencyScore, nb.FluencyScore),
+		completeness: num(pa.CompletenessScore, nb.CompletenessScore),
+		prosody: num(pa.ProsodyScore, nb.ProsodyScore),
+		pron: num(pa.PronScore, nb.PronScore),
+		words,
+		...(debug ? { _raw: data } : {})
 	});
 };
