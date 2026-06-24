@@ -37,6 +37,8 @@ export interface GeneratedWord {
 export interface PhonemeScore {
 	phoneme: string;
 	accuracy: number | null;
+	/** Top alternatives Azure actually heard, best-first (for suggestions). */
+	nbest?: { phoneme: string; score: number }[];
 }
 
 export interface PronounceWord {
@@ -51,6 +53,7 @@ export interface PronounceResult {
 	accuracy: number | null;
 	fluency: number | null;
 	completeness: number | null;
+	prosody: number | null;
 	pron: number | null;
 	words: PronounceWord[];
 }

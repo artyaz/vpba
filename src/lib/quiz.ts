@@ -1,8 +1,11 @@
 import type { QuizItem } from './types';
 
-/** Pick the next item, weighting weakly-remembered words higher and
- * avoiding an immediate repeat of the same word when possible. */
-export function pickNext(items: QuizItem[], lastId?: number): QuizItem | null {
+/** Pick the next item, weighting weakly-remembered ones higher and avoiding an
+ * immediate repeat when possible. Works for anything with id + recollection. */
+export function pickWeighted<T extends { id: number; recollection: number }>(
+	items: T[],
+	lastId?: number
+): T | null {
 	if (items.length === 0) return null;
 	if (items.length === 1) return items[0];
 
@@ -19,3 +22,5 @@ export function pickNext(items: QuizItem[], lastId?: number): QuizItem | null {
 	}
 	return arr[arr.length - 1];
 }
+
+export const pickNext = (items: QuizItem[], lastId?: number) => pickWeighted(items, lastId);

@@ -1,19 +1,6 @@
 // Browser mic capture → 16 kHz mono 16-bit PCM WAV.
-// Uses ScriptProcessorNode (deprecated but universally supported, incl. iOS
-// standalone PWAs) and encodes WAV by hand so we never depend on MediaRecorder
-// codec support, which is patchy on iOS.
-
-function mergeFloat32(chunks: Float32Array[]): Float32Array {
-	let len = 0;
-	for (const c of chunks) len += c.length;
-	const out = new Float32Array(len);
-	let off = 0;
-	for (const c of chunks) {
-		out.set(c, off);
-		off += c.length;
-	}
-	return out;
-}
+// Records with MediaRecorder (reliable everywhere, incl. iOS) and decodes to raw
+// PCM ourselves, so we never depend on Azure understanding webm/opus or mp4/aac.
 
 function downsample(buf: Float32Array, inRate: number, outRate: number): Float32Array {
 	if (outRate >= inRate) return buf;
@@ -33,6 +20,15 @@ function downsample(buf: Float32Array, inRate: number, outRate: number): Float32
 		pos = next;
 	}
 	return out;
+}
+
+function peakLevel(buf: Float32Array): number {
+	let p = 0;
+	for (let i = 0; i < buf.length; i++) {
+		const a = Math.abs(buf[i]);
+		if (a > p) p = a;
+	}
+	return p;
 }
 
 function encodeWav(samples: Float32Array, rate: number): ArrayBuffer {
@@ -63,43 +59,58 @@ function encodeWav(samples: Float32Array, rate: number): ArrayBuffer {
 	return buffer;
 }
 
+export interface Recording {
+	blob: Blob;
+	/** 0..1 peak amplitude — near zero means we captured silence. */
+	peak: number;
+	/** seconds of audio captured */
+	seconds: number;
+}
+
 export class Recorder {
-	private ctx: AudioContext | null = null;
 	private stream: MediaStream | null = null;
-	private node: ScriptProcessorNode | null = null;
-	private source: MediaStreamAudioSourceNode | null = null;
-	private chunks: Float32Array[] = [];
-	private rate = 16000;
+	private mr: MediaRecorder | null = null;
+	private chunks: BlobPart[] = [];
 
 	async start(): Promise<void> {
 		this.stream = await navigator.mediaDevices.getUserMedia({
 			audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
 		});
-		const Ctx: typeof AudioContext =
-			window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-		this.ctx = new Ctx();
-		if (this.ctx.state === 'suspended') await this.ctx.resume();
-		this.rate = this.ctx.sampleRate;
-		this.source = this.ctx.createMediaStreamSource(this.stream);
-		this.node = this.ctx.createScriptProcessor(4096, 1, 1);
 		this.chunks = [];
-		this.node.onaudioprocess = (e) => {
-			this.chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+		this.mr = new MediaRecorder(this.stream);
+		this.mr.ondataavailable = (e) => {
+			if (e.data && e.data.size) this.chunks.push(e.data);
 		};
-		this.source.connect(this.node);
-		this.node.connect(this.ctx.destination); // required to pump audio; output stays silent
+		this.mr.start();
 	}
 
-	async stop(): Promise<Blob> {
-		this.node?.disconnect();
-		this.source?.disconnect();
+	async stop(): Promise<Recording> {
+		const mr = this.mr;
+		if (!mr) throw new Error('not recording');
+
+		await new Promise<void>((resolve) => {
+			mr.onstop = () => resolve();
+			mr.stop();
+		});
 		this.stream?.getTracks().forEach((t) => t.stop());
-		const merged = mergeFloat32(this.chunks);
-		const down = downsample(merged, this.rate, 16000);
+
+		const recorded = new Blob(this.chunks, { type: this.chunks.length ? undefined : 'audio/webm' });
+		const arr = await recorded.arrayBuffer();
+
+		const Ctx: typeof AudioContext =
+			window.AudioContext ??
+			(window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+		const ctx = new Ctx();
+		const audio = await ctx.decodeAudioData(arr);
+		const mono = audio.getChannelData(0);
+		const down = downsample(mono, audio.sampleRate, 16000);
+		const peak = peakLevel(down);
 		const wav = encodeWav(down, 16000);
-		await this.ctx?.close().catch(() => {});
-		this.ctx = this.node = this.source = this.stream = null;
+		await ctx.close().catch(() => {});
+
+		this.mr = null;
+		this.stream = null;
 		this.chunks = [];
-		return new Blob([wav], { type: 'audio/wav' });
+		return { blob: new Blob([wav], { type: 'audio/wav' }), peak, seconds: down.length / 16000 };
 	}
 }

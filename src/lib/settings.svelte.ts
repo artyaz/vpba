@@ -49,3 +49,32 @@ export function save() {
 export const dbReady = () => Boolean(settings.dbUrl);
 export const azureReady = () => Boolean(settings.azureKey);
 export const aiReady = () => Boolean(settings.ai.baseUrl && settings.ai.apiKey && settings.ai.model);
+
+/** A portable, copy-pasteable blob of the whole config (keys included). */
+export function exportConfig(): string {
+	const json = JSON.stringify({ ...settings, ai: { ...settings.ai } });
+	const b64 = btoa(unescape(encodeURIComponent(json)));
+	return `gapfill:${b64}`;
+}
+
+/** Load a config string produced by exportConfig(). Returns true on success. */
+export function importConfig(text: string): boolean {
+	try {
+		const raw = text.trim().replace(/^gapfill:/, '');
+		const json = decodeURIComponent(escape(atob(raw)));
+		const next = JSON.parse(json);
+		settings.dbUrl = String(next.dbUrl ?? '');
+		settings.dbTable = String(next.dbTable ?? 'words') || 'words';
+		settings.azureKey = String(next.azureKey ?? '');
+		settings.azureRegion = String(next.azureRegion ?? 'eastus') || 'eastus';
+		settings.ai = {
+			baseUrl: String(next.ai?.baseUrl ?? ''),
+			apiKey: String(next.ai?.apiKey ?? ''),
+			model: String(next.ai?.model ?? '')
+		};
+		save();
+		return true;
+	} catch {
+		return false;
+	}
+}

@@ -3,12 +3,17 @@
 	import { settings } from '$lib/settings.svelte';
 	import type { PronounceResult } from '$lib/types';
 
-	let { word }: { word: string } = $props();
+	let { word, sentence = '' }: { word: string; sentence?: string } = $props();
 
+	let mode = $state<'word' | 'sentence'>('word');
 	let phase = $state<'idle' | 'recording' | 'scoring'>('idle');
 	let result = $state<PronounceResult | null>(null);
 	let error = $state('');
 	let rec: Recorder | null = null;
+
+	const reference = $derived(mode === 'sentence' && sentence ? sentence : word);
+	const tips = $derived(result ? weakPhonemes(result) : []);
+	const multiWord = $derived((result?.words.length ?? 0) > 1);
 
 	// reset whenever the word changes
 	$effect(() => {
@@ -18,11 +23,54 @@
 		phase = 'idle';
 	});
 
+	function setMode(m: 'word' | 'sentence') {
+		if (m === mode) return;
+		mode = m;
+		result = null;
+		error = '';
+	}
+
 	function tone(s: number | null): string {
 		if (s == null) return 'na';
 		if (s >= 80) return 'good';
 		if (s >= 60) return 'mid';
 		return 'bad';
+	}
+
+	function round(n: number | null): number {
+		return Math.round(n ?? 0);
+	}
+
+	function statList(r: PronounceResult) {
+		return (
+			[
+				{ label: 'accuracy', v: r.accuracy },
+				{ label: 'fluency', v: r.fluency },
+				{ label: 'completeness', v: r.completeness },
+				{ label: 'prosody', v: r.prosody }
+			] as { label: string; v: number | null }[]
+		).filter((s) => s.v != null) as { label: string; v: number }[];
+	}
+
+	/** Lowest-scoring phonemes (with what Azure thinks it heard instead). */
+	function weakPhonemes(r: PronounceResult) {
+		const out: { phoneme: string; accuracy: number; heard?: string; word: string }[] = [];
+		for (const w of r.words) {
+			for (const p of w.phonemes) {
+				if (p.accuracy != null && p.accuracy < 60) {
+					const alt = p.nbest?.find((n) => n.phoneme !== p.phoneme);
+					out.push({ phoneme: p.phoneme, accuracy: p.accuracy, heard: alt?.phoneme, word: w.word });
+				}
+			}
+		}
+		return out.sort((a, b) => a.accuracy - b.accuracy).slice(0, 5);
+	}
+
+	function errLabel(t: string): string {
+		if (t === 'Omission') return 'you skipped that one';
+		if (t === 'Insertion') return 'extra sound in there';
+		if (t === 'Mispronunciation') return 'a bit off';
+		return '';
 	}
 
 	function micError(e: unknown): string {
@@ -51,17 +99,22 @@
 
 		// phase === 'recording' → stop and score
 		phase = 'scoring';
-		let blob: Blob;
+		let rec_;
 		try {
-			blob = await rec!.stop();
+			rec_ = await rec!.stop();
 		} catch (e) {
 			error = (e as Error).message;
 			phase = 'idle';
 			return;
 		}
+		if (rec_.peak < 0.012) {
+			error = "didn't pick up any sound — check the mic isn't muted and try a bit louder.";
+			phase = 'idle';
+			return;
+		}
 		const fd = new FormData();
-		fd.append('text', word);
-		fd.append('audio', blob, 'speech.wav');
+		fd.append('text', reference);
+		fd.append('audio', rec_.blob, 'speech.wav');
 		fd.append('key', settings.azureKey);
 		fd.append('region', settings.azureRegion);
 		try {
@@ -78,31 +131,75 @@
 </script>
 
 <div class="pron">
+	{#if sentence}
+		<div class="modes">
+			<button class:on={mode === 'word'} onclick={() => setMode('word')}>word</button>
+			<button class:on={mode === 'sentence'} onclick={() => setMode('sentence')}>sentence</button>
+		</div>
+	{/if}
+
 	<button class="mic" class:rec={phase === 'recording'} onclick={toggle} disabled={phase === 'scoring'}>
 		<span class="ico">{phase === 'recording' ? '■' : '🎤'}</span>
 		<span class="lbl">
 			{#if phase === 'recording'}recording — tap to stop
 			{:else if phase === 'scoring'}scoring…
 			{:else if result}say it again
-			{:else}say it{/if}
+			{:else}say {mode === 'sentence' ? 'the sentence' : 'it'}{/if}
 		</span>
 	</button>
 
 	{#if error}<p class="err">{error}</p>{/if}
 
 	{#if result}
-		<div class="scores">
-			<span class="overall {tone(result.accuracy)}">{Math.round(result.accuracy ?? 0)}</span>
-			<div class="phon">
-				{#each result.words as w}
-					{#each w.phonemes as p}
-						<span class="ph {tone(p.accuracy)}" title={`${Math.round(p.accuracy ?? 0)}`}>{p.phoneme}</span>
+		<div class="result">
+			<div class="scores">
+				<span class="overall {tone(result.pron ?? result.accuracy)}">{round(result.pron ?? result.accuracy)}</span>
+				<div class="stats">
+					{#each statList(result) as s}
+						<span class="stat"><b class={tone(s.v)}>{round(s.v)}</b> {s.label}</span>
 					{/each}
-				{/each}
-				{#if result.words.every((w) => w.phonemes.length === 0)}
-					<span class="muted">heard “{result.recognized || '—'}”</span>
-				{/if}
+				</div>
 			</div>
+
+			{#if multiWord}
+				<div class="phon">
+					{#each result.words as w}
+						<span class="ph {tone(w.accuracy)}" title={`${round(w.accuracy)}`}>{w.word}</span>
+					{/each}
+				</div>
+			{:else if result.words.some((w) => w.phonemes.length)}
+				<div class="phon">
+					{#each result.words as w}
+						{#each w.phonemes as p}
+							<span class="ph {tone(p.accuracy)}" title={`${round(p.accuracy)}`}>{p.phoneme}</span>
+						{/each}
+					{/each}
+				</div>
+			{/if}
+
+			{#each result.words as w}
+				{#if w.errorType && w.errorType !== 'None'}
+					<p class="muted">“{w.word}” — {errLabel(w.errorType)}</p>
+				{/if}
+			{/each}
+
+			{#if tips.length}
+				<p class="muted tiplead">work on these sounds</p>
+				<ul class="tips">
+					{#each tips as t}
+						<li>
+							{#if multiWord}<span class="muted">{t.word}:</span>{/if}
+							<span class="ph bad">{t.phoneme}</span>
+							{#if t.heard}sounded more like <span class="ph mid">{t.heard}</span>{:else}came out unclear{/if}
+							<span class="muted">({round(t.accuracy)})</span>
+						</li>
+					{/each}
+				</ul>
+			{:else if result.words.some((w) => w.phonemes.length)}
+				<p class="muted">clean across the board 👌</p>
+			{/if}
+
+			<p class="muted heard">heard: {result.recognized || '—'}</p>
 		</div>
 	{/if}
 </div>
@@ -112,6 +209,27 @@
 		display: flex;
 		flex-direction: column;
 		gap: 12px;
+	}
+	.modes {
+		display: flex;
+		gap: 2px;
+		align-self: flex-start;
+		font-size: 13px;
+	}
+	.modes button {
+		padding: 4px 11px;
+		border-radius: 999px;
+		color: var(--muted);
+	}
+	.modes button.on {
+		color: var(--ink);
+		background: color-mix(in srgb, var(--ink) 8%, transparent);
+	}
+	.tiplead {
+		margin: 2px 0 -4px;
+		font-size: 12px;
+		text-transform: uppercase;
+		letter-spacing: 0.07em;
 	}
 	.mic {
 		align-self: flex-start;
@@ -142,6 +260,11 @@
 		}
 	}
 
+	.result {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+	}
 	.scores {
 		display: flex;
 		align-items: center;
@@ -158,6 +281,39 @@
 		place-items: center;
 		border-radius: 12px;
 		border: 2px solid currentColor;
+		flex: none;
+	}
+	.stats {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px 14px;
+		font-size: 12px;
+		color: var(--muted);
+	}
+	.stat {
+		font-variant-numeric: tabular-nums;
+	}
+	.stat b {
+		font-weight: 700;
+	}
+	.tips {
+		margin: 0;
+		padding: 0;
+		list-style: none;
+		display: flex;
+		flex-direction: column;
+		gap: 7px;
+	}
+	.tips li {
+		display: flex;
+		align-items: center;
+		gap: 7px;
+		font-size: 14px;
+		color: var(--muted);
+		flex-wrap: wrap;
+	}
+	.heard {
+		font-size: 13px;
 	}
 	.phon {
 		display: flex;

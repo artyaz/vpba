@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { settings, save } from '$lib/settings.svelte';
+	import { settings, save, exportConfig, importConfig } from '$lib/settings.svelte';
 	import { testConnection, createTable } from '$lib/db.client';
 
 	let saved = $state(false);
@@ -7,6 +7,29 @@
 	let dbMsg = $state('');
 	let aiTesting = $state(false);
 	let aiMsg = $state('');
+
+	let copied = $state(false);
+	let importText = $state('');
+	let importMsg = $state('');
+
+	async function copyConfig() {
+		const code = exportConfig();
+		try {
+			await navigator.clipboard.writeText(code);
+			copied = true;
+			setTimeout(() => (copied = false), 1500);
+		} catch {
+			importText = code; // clipboard blocked — drop it in the box so they can copy it
+		}
+	}
+
+	function doImport() {
+		if (!importText.trim()) return;
+		const ok = importConfig(importText);
+		importMsg = ok ? '✓ Imported — everything is filled in.' : '✗ That code didn’t look right.';
+		if (ok) importText = '';
+		setTimeout(() => (importMsg = ''), 2500);
+	}
 
 	function persist() {
 		save();
@@ -160,6 +183,31 @@
 		{#if aiMsg}<p class="status" class:ok={aiMsg.startsWith('✓')}>{aiMsg}</p>{/if}
 	</section>
 
+	<section>
+		<h2>Move to another device</h2>
+		<p class="hint">
+			Copy your whole setup as one code, then paste it on another phone or browser so you don't
+			retype everything. It contains your keys — only share it with yourself.
+		</p>
+		<div class="row">
+			<button class="ghost" onclick={copyConfig}>{copied ? 'Copied ✓' : 'Copy my config'}</button>
+		</div>
+		<label>
+			<span>Paste a config code to import</span>
+			<textarea
+				bind:value={importText}
+				rows="2"
+				placeholder="gapfill:…"
+				autocapitalize="none"
+				spellcheck="false"
+			></textarea>
+		</label>
+		<div class="row">
+			<button class="ghost" onclick={doImport} disabled={!importText.trim()}>Import</button>
+		</div>
+		{#if importMsg}<p class="status" class:ok={importMsg.startsWith('✓')}>{importMsg}</p>{/if}
+	</section>
+
 	<div class="savebar">
 		<button class="primary" onclick={persist}>{saved ? 'Saved ✓' : 'Save'}</button>
 	</div>
@@ -219,15 +267,21 @@
 		font-size: 13px;
 		color: var(--muted);
 	}
-	input {
+	input,
+	textarea {
 		padding: 13px 15px;
 		border: 1.5px solid var(--line);
 		border-radius: 13px;
 		background: var(--panel);
 		color: var(--ink);
 		outline: none;
+		font-family: inherit;
+		width: 100%;
+		resize: vertical;
+		line-height: 1.5;
 	}
-	input:focus {
+	input:focus,
+	textarea:focus {
 		border-color: color-mix(in srgb, var(--ink) 45%, var(--line));
 	}
 	.row {

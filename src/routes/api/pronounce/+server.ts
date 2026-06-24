@@ -22,7 +22,10 @@ export const POST: RequestHandler = async ({ request }) => {
 		GradingSystem: 'HundredMark',
 		Granularity: 'Phoneme',
 		Dimension: 'Comprehensive',
-		EnableMiscue: 'False'
+		EnableMiscue: 'False',
+		EnableProsodyAssessment: 'True',
+		PhonemeAlphabet: 'SAPI',
+		NBestPhonemeCount: 5
 	};
 	const paHeader = btoa(unescape(encodeURIComponent(JSON.stringify(params))));
 
@@ -53,17 +56,26 @@ export const POST: RequestHandler = async ({ request }) => {
 	const data = await res.json().catch(() => null);
 	const nb = data?.NBest?.[0];
 	if (!nb) {
-		return json(
-			{ error: "Didn't catch any speech — try again, a little louder and closer." },
-			{ status: 200 }
-		);
+		const status = data?.RecognitionStatus;
+		const msg =
+			status && status !== 'Success'
+				? `No speech recognized (${status}). Speak a little louder and closer to the mic.`
+				: "Didn't catch any speech — try again, a little louder and closer.";
+		return json({ error: msg }, { status: 200 });
 	}
 
 	const pa = nb.PronunciationAssessment ?? {};
+	type AzPhoneme = {
+		Phoneme: string;
+		PronunciationAssessment?: {
+			AccuracyScore?: number;
+			NBestPhonemes?: Array<{ Phoneme: string; Score: number }>;
+		};
+	};
 	type AzWord = {
 		Word: string;
 		PronunciationAssessment?: { AccuracyScore?: number; ErrorType?: string };
-		Phonemes?: Array<{ Phoneme: string; PronunciationAssessment?: { AccuracyScore?: number } }>;
+		Phonemes?: AzPhoneme[];
 	};
 	const words = ((nb.Words ?? []) as AzWord[]).map((w) => ({
 		word: w.Word,
@@ -71,7 +83,11 @@ export const POST: RequestHandler = async ({ request }) => {
 		errorType: w.PronunciationAssessment?.ErrorType ?? 'None',
 		phonemes: (w.Phonemes ?? []).map((p) => ({
 			phoneme: p.Phoneme,
-			accuracy: p.PronunciationAssessment?.AccuracyScore ?? null
+			accuracy: p.PronunciationAssessment?.AccuracyScore ?? null,
+			nbest: (p.PronunciationAssessment?.NBestPhonemes ?? []).map((n) => ({
+				phoneme: n.Phoneme,
+				score: n.Score
+			}))
 		}))
 	}));
 
@@ -80,6 +96,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		accuracy: pa.AccuracyScore ?? null,
 		fluency: pa.FluencyScore ?? null,
 		completeness: pa.CompletenessScore ?? null,
+		prosody: pa.ProsodyScore ?? null,
 		pron: pa.PronScore ?? null,
 		words
 	});
