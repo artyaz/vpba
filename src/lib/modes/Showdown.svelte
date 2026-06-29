@@ -74,20 +74,34 @@
 		return syns.length ? { kind, word, options: buildSynonymOptions(syns, word, words) } : null;
 	}
 
-	/** Select/recognition types — used the first time a word appears so it's introduced gently. */
-	function recognitionKinds(word: WordRow, syns: string[]): Round['kind'][] {
+	/** Simple "select" types — tap-to-pick, used to warm up on every word first. */
+	function simpleKinds(word: WordRow, syns: string[]): Round['kind'][] {
 		const kinds: Round['kind'][] = ['choice'];
 		if (makeQuizItems(word).length) kinds.push('gapselect');
 		if (syns.length) kinds.push('syn');
 		return kinds;
 	}
 
-	/** Everything, including the harder typing types — used once a word has been seen. */
-	function allKinds(word: WordRow, syns: string[]): Round['kind'][] {
-		const kinds: Round['kind'][] = ['choice', 'recall'];
-		if (makeQuizItems(word).length) kinds.push('gap', 'gapselect');
-		if (syns.length) kinds.push('syn');
+	/** Harder typing types — recall the word / type the missing word. */
+	function complexKinds(word: WordRow): Round['kind'][] {
+		const kinds: Round['kind'][] = ['recall'];
+		if (makeQuizItems(word).length) kinds.push('gap');
 		return kinds;
+	}
+
+	/** Build one round of a random feasible kind for a word, avoiding repeating `prev`. */
+	function buildOne(
+		w: WordRow,
+		syns: string[],
+		kinds: Round['kind'][],
+		prev: Round | undefined
+	): Round | null {
+		for (const kind of sample(kinds, kinds.length)) {
+			if (prev && prev.word.id === w.id && prev.kind === kind) continue;
+			const round = makeRound(kind, w, syns);
+			if (round) return round;
+		}
+		return null;
 	}
 
 	async function start() {
@@ -104,32 +118,34 @@
 			})
 		);
 
+		const syns = (w: WordRow) => synMap.get(w.id) ?? [];
 		const target = Math.max(1, settings.showdownRounds || 10);
-		const out: Round[] = [];
-		const appeared = new Set<number>();
+
+		// phase 1 — one simple/recognition round per word, all words, shuffled together,
+		// so you recognise every word before the harder drilling starts.
+		const warmup: Round[] = [];
+		for (const w of trio) {
+			const r = buildOne(w, syns(w), simpleKinds(w, syns(w)), undefined);
+			if (r) warmup.push(r);
+		}
+		const phase1 = sample(warmup, warmup.length);
+
+		// phase 2 — the harder typing exercises, shuffled across all words.
+		const phase2: Round[] = [];
 		let guard = 0;
-		while (out.length < target && guard < target * 12) {
+		const need = Math.max(0, target - phase1.length);
+		while (phase2.length < need && guard < need * 12 + 12) {
 			guard++;
 			const w = rand(trio);
-			const syns = synMap.get(w.id) ?? [];
-			// a word's first appearance is always a recognition (select) exercise
-			const kinds = appeared.has(w.id) ? allKinds(w, syns) : recognitionKinds(w, syns);
-			if (!kinds.length) continue;
-			const kind = rand(kinds);
-			const prev = out[out.length - 1];
-			if (prev && prev.word.id === w.id && prev.kind === kind) continue;
-			const round = makeRound(kind, w, syns);
-			if (round) {
-				out.push(round);
-				appeared.add(w.id);
-			}
+			const r = buildOne(w, syns(w), complexKinds(w), phase2[phase2.length - 1]);
+			if (r) phase2.push(r);
 		}
 
-		rounds = out;
+		rounds = [...phase1.slice(0, target), ...phase2];
 		index = 0;
 		score = 0;
 		resetRound();
-		phase = out.length ? 'playing' : 'idle';
+		phase = rounds.length ? 'playing' : 'idle';
 	}
 
 	function resetRound() {
