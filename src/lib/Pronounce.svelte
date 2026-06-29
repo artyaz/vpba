@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Recorder } from '$lib/audio';
 	import { settings } from '$lib/settings.svelte';
+	import { speak, stopSpeaking, ttsReady } from '$lib/tts';
 	import type { PronounceResult } from '$lib/types';
 
 	let { word, sentence = '' }: { word: string; sentence?: string } = $props();
@@ -21,6 +22,7 @@
 		result = null;
 		error = '';
 		phase = 'idle';
+		stopSpeaking();
 	});
 
 	function setMode(m: 'word' | 'sentence') {
@@ -71,6 +73,10 @@
 		if (t === 'Insertion') return 'extra sound in there';
 		if (t === 'Mispronunciation') return 'a bit off';
 		return '';
+	}
+
+	function hear() {
+		speak(reference);
 	}
 
 	function micError(e: unknown): string {
@@ -138,15 +144,23 @@
 		</div>
 	{/if}
 
-	<button class="mic" class:rec={phase === 'recording'} onclick={toggle} disabled={phase === 'scoring'}>
-		<span class="ico">{phase === 'recording' ? '■' : '🎤'}</span>
-		<span class="lbl">
-			{#if phase === 'recording'}recording — tap to stop
-			{:else if phase === 'scoring'}scoring…
-			{:else if result}say it again
-			{:else}say {mode === 'sentence' ? 'the sentence' : 'it'}{/if}
-		</span>
-	</button>
+	<div class="controls">
+		<button class="mic" class:rec={phase === 'recording'} onclick={toggle} disabled={phase === 'scoring'}>
+			<span class="ico">{phase === 'recording' ? '■' : '🎤'}</span>
+			<span class="lbl">
+				{#if phase === 'recording'}recording — tap to stop
+				{:else if phase === 'scoring'}scoring…
+				{:else if result}say it again
+				{:else}say {mode === 'sentence' ? 'the sentence' : 'it'}{/if}
+			</span>
+		</button>
+		{#if ttsReady()}
+			<button class="hear" onclick={hear} aria-label="Hear it">
+				<span class="ico">🔊</span>
+				<span class="lbl">hear {mode === 'sentence' ? 'the sentence' : 'it'}</span>
+			</button>
+		{/if}
+	</div>
 
 	{#if error}<p class="err">{error}</p>{/if}
 
@@ -231,8 +245,14 @@
 		text-transform: uppercase;
 		letter-spacing: 0.07em;
 	}
-	.mic {
-		align-self: flex-start;
+	.controls {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		align-items: center;
+	}
+	.mic,
+	.hear {
 		display: inline-flex;
 		align-items: center;
 		gap: 9px;
@@ -241,6 +261,9 @@
 		border: 1.5px solid var(--line);
 		background: var(--panel);
 		font-size: 14px;
+	}
+	.hear:active {
+		background: color-mix(in srgb, var(--ink) 8%, transparent);
 	}
 	.mic:disabled {
 		opacity: 0.6;

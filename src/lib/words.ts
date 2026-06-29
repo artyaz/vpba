@@ -55,3 +55,19 @@ export function buildChoices(row: WordRow, all: WordRow[], max = 4): ChoiceOptio
 		.slice(0, max - 1);
 	return shuffle([{ text: correct, correct: true }, ...others.map((t) => ({ text: t, correct: false }))]);
 }
+
+/** Build word options: the right word + other headwords as distractors. */
+export function buildWordChoices(correct: string, all: WordRow[], excludeId: number, max = 4): ChoiceOption[] {
+	const c = correct.trim();
+	const seen = new Set([c.toLowerCase()]);
+	const distract: string[] = [];
+	for (const w of shuffle(all.filter((x) => x.id !== excludeId))) {
+		const t = w.word.trim();
+		const k = t.toLowerCase();
+		if (!t || seen.has(k)) continue;
+		seen.add(k);
+		distract.push(t);
+		if (distract.length >= max - 1) break;
+	}
+	return shuffle([{ text: c, correct: true }, ...distract.map((t) => ({ text: t, correct: false }))]);
+}

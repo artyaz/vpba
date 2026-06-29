@@ -1,10 +1,20 @@
 <script lang="ts">
-	import { settings, save, exportConfig, importConfig } from '$lib/settings.svelte';
+	import { settings, save, exportConfig, importConfig, addDeck, removeDeck, setActiveDeck } from '$lib/settings.svelte';
 	import { testConnection, createTable } from '$lib/db.client';
 
 	let saved = $state(false);
 	let dbBusy = $state(false);
 	let dbMsg = $state('');
+	let newDeck = $state('');
+
+	function addDeckUI() {
+		const name = addDeck(newDeck);
+		if (name) {
+			setActiveDeck(name);
+			newDeck = '';
+			dbMsg = `✓ Deck “${name}” added and selected. Hit Create table if it's new.`;
+		}
+	}
 	let aiTesting = $state(false);
 	let aiMsg = $state('');
 
@@ -104,10 +114,31 @@
 				spellcheck="false"
 			/>
 		</label>
-		<label>
-			<span>Table name</span>
-			<input bind:value={settings.dbTable} autocapitalize="none" autocorrect="off" spellcheck="false" />
-		</label>
+		<div class="decks">
+			<span class="declabel">Decks <span class="hint">— one table each, e.g. a language or a list</span></span>
+			<div class="chips">
+				{#each settings.decks as d}
+					<span class="deckchip" class:on={d === settings.dbTable}>
+						<button class="pick" onclick={() => setActiveDeck(d)}>{d}</button>
+						{#if settings.decks.length > 1}
+							<button class="rm" onclick={() => removeDeck(d)} aria-label={`Remove ${d}`}>×</button>
+						{/if}
+					</span>
+				{/each}
+			</div>
+			<div class="seed">
+				<input
+					bind:value={newDeck}
+					onkeydown={(e) => e.key === 'Enter' && addDeckUI()}
+					placeholder="new deck name — e.g. spanish"
+					autocapitalize="none"
+					autocorrect="off"
+					autocomplete="off"
+					spellcheck="false"
+				/>
+				<button class="ghost" onclick={addDeckUI} disabled={!newDeck.trim()}>Add deck</button>
+			</div>
+		</div>
 		<div class="row">
 			<button class="ghost" onclick={testDb} disabled={dbBusy || !settings.dbUrl}>Test connection</button>
 			<button class="ghost" onclick={initDb} disabled={dbBusy || !settings.dbUrl}>
@@ -116,8 +147,9 @@
 		</div>
 		{#if dbMsg}<p class="status" class:ok={dbMsg.startsWith('✓')}>{dbMsg}</p>{/if}
 		<p class="hint">
-			New database? Paste the string and hit <strong>Create table</strong>. Tip: for safety, use a
-			Postgres role limited to this table rather than your admin string.
+			The highlighted deck is the active one — <strong>Test</strong> and <strong>Create table</strong>
+			act on it. New deck or database? Add it, then hit <strong>Create table</strong>. Tip: use a
+			Postgres role limited to these tables rather than your admin string.
 		</p>
 	</section>
 
@@ -283,6 +315,53 @@
 	input:focus,
 	textarea:focus {
 		border-color: color-mix(in srgb, var(--ink) 45%, var(--line));
+	}
+	.decks {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+	}
+	.declabel {
+		font-size: 13px;
+		color: var(--muted);
+	}
+	.declabel .hint {
+		display: inline;
+	}
+	.chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+	.deckchip {
+		display: inline-flex;
+		align-items: center;
+		border: 1.5px solid var(--line);
+		border-radius: 999px;
+		overflow: hidden;
+	}
+	.deckchip.on {
+		border-color: var(--ink);
+		background: color-mix(in srgb, var(--ink) 8%, transparent);
+	}
+	.deckchip .pick {
+		padding: 8px 12px;
+		font-size: 14px;
+		color: var(--ink);
+	}
+	.deckchip .rm {
+		padding: 8px 11px 8px 4px;
+		color: var(--muted);
+		font-size: 16px;
+		line-height: 1;
+	}
+	.seed {
+		display: flex;
+		gap: 10px;
+	}
+	.seed input {
+		flex: 1;
+		min-width: 0;
 	}
 	.row {
 		display: flex;

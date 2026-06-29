@@ -1,13 +1,15 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { getWords } from '$lib/db.client';
 	import { SAMPLE_WORDS } from '$lib/sample';
 	import { settings, dbReady } from '$lib/settings.svelte';
 	import { modeState } from '$lib/mode.svelte';
 	import GapFill from '$lib/modes/GapFill.svelte';
+	import GapSelect from '$lib/modes/GapSelect.svelte';
 	import Choice from '$lib/modes/Choice.svelte';
 	import Recall from '$lib/modes/Recall.svelte';
+	import Synonym from '$lib/modes/Synonym.svelte';
 	import Compose from '$lib/modes/Compose.svelte';
+	import Showdown from '$lib/modes/Showdown.svelte';
 	import type { WordRow } from '$lib/types';
 
 	let words = $state<WordRow[]>([]);
@@ -34,7 +36,11 @@
 		}
 	}
 
-	onMount(load);
+	// reload whenever the page mounts or the active deck (table) changes
+	$effect(() => {
+		settings.dbTable;
+		load();
+	});
 </script>
 
 <svelte:head><title>Gapfill</title></svelte:head>
@@ -55,12 +61,18 @@
 	</div>
 {:else if modeState.id === 'gap'}
 	{#key words}<GapFill {words} {usingSample} />{/key}
+{:else if modeState.id === 'gapselect'}
+	{#key words}<GapSelect {words} {usingSample} />{/key}
 {:else if modeState.id === 'choice'}
 	{#key words}<Choice {words} {usingSample} />{/key}
 {:else if modeState.id === 'recall'}
 	{#key words}<Recall {words} {usingSample} />{/key}
+{:else if modeState.id === 'synonym'}
+	{#key words}<Synonym {words} {usingSample} />{/key}
 {:else if modeState.id === 'compose'}
 	{#key words}<Compose {words} {usingSample} />{/key}
+{:else if modeState.id === 'showdown'}
+	{#key words}<Showdown {words} {usingSample} />{/key}
 {/if}
 
 <style>

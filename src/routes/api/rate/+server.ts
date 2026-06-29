@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { chat } from '$lib/server/chat';
 
 const SYSTEM = `You are a witty, sharp English writing coach — think a smart late-night writers' room, encouraging but honest, never dull.
 A learner is practising a target word by writing one sentence with it. Judge how well they used it: is it grammatically correct, natural, and does it show they actually understand the meaning (not just slot it in)? Reward sentences that are vivid, specific or funny; gently mark down flat, generic or incorrect ones.
@@ -39,34 +40,30 @@ export const POST: RequestHandler = async ({ request, fetch }) => {
 	}
 	if (!w || !s) return json({ error: 'Need a word and a sentence.' }, { status: 400 });
 
-	let res: Response;
+	let res;
 	try {
-		res = await fetch(`${config.baseUrl}/chat/completions`, {
-			method: 'POST',
-			headers: { 'content-type': 'application/json', authorization: `Bearer ${config.apiKey}` },
-			body: JSON.stringify({
-				model: config.model,
-				temperature: 0.6,
-				messages: [
-					{ role: 'system', content: SYSTEM },
-					{
-						role: 'user',
-						content: `Target word: ${w}\nMeaning: ${definition || '(use your own knowledge)'}\nTheir sentence: ${s}`
-					}
-				]
-			})
-		});
+		// short, structured reply — cap tokens and force JSON to cut latency
+		res = await chat(
+			fetch,
+			config,
+			[
+				{ role: 'system', content: SYSTEM },
+				{
+					role: 'user',
+					content: `Target word: ${w}\nMeaning: ${definition || '(use your own knowledge)'}\nTheir sentence: ${s}`
+				}
+			],
+			{ temperature: 0.6, maxTokens: 250, json: true }
+		);
 	} catch (e) {
 		return json({ error: `Could not reach the AI endpoint: ${(e as Error).message}` }, { status: 502 });
 	}
 
 	if (!res.ok) {
-		const detail = await res.text().catch(() => '');
-		return json({ error: `AI endpoint error (${res.status}). ${detail.slice(0, 300)}` }, { status: 502 });
+		return json({ error: `AI endpoint error (${res.status}). ${res.detail.slice(0, 300)}` }, { status: 502 });
 	}
 
-	const data = await res.json().catch(() => null);
-	const rating = extract(data?.choices?.[0]?.message?.content ?? '');
+	const rating = extract(res.content);
 	if (!rating) {
 		return json({ error: 'The model did not return a usable score. Try a stronger model.' }, { status: 502 });
 	}

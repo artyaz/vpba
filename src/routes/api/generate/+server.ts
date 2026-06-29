@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { chat } from '$lib/server/chat';
 import type { GeneratedWord } from '$lib/types';
 
 const SYSTEM = `You are a sharp, witty English lexicographer — think the writers' room of a smart late-night show, not a dull textbook.
@@ -33,35 +34,27 @@ export const POST: RequestHandler = async ({ request, fetch }) => {
 	}
 	if (!w) return json({ error: 'No word provided.' }, { status: 400 });
 
-	let res: Response;
+	let res;
 	try {
-		res = await fetch(`${config.baseUrl}/chat/completions`, {
-			method: 'POST',
-			headers: {
-				'content-type': 'application/json',
-				authorization: `Bearer ${config.apiKey}`
-			},
-			body: JSON.stringify({
-				model: config.model,
-				temperature: 0.8,
-				messages: [
-					{ role: 'system', content: SYSTEM },
-					{ role: 'user', content: `Target: ${w}` }
-				]
-			})
-		});
+		// cap output + force JSON so the model stops early and we don't retry on stray prose
+		res = await chat(
+			fetch,
+			config,
+			[
+				{ role: 'system', content: SYSTEM },
+				{ role: 'user', content: `Target: ${w}` }
+			],
+			{ temperature: 0.8, maxTokens: 600, json: true }
+		);
 	} catch (e) {
 		return json({ error: `Could not reach the AI endpoint: ${(e as Error).message}` }, { status: 502 });
 	}
 
 	if (!res.ok) {
-		const detail = await res.text().catch(() => '');
-		return json({ error: `AI endpoint error (${res.status}). ${detail.slice(0, 300)}` }, { status: 502 });
+		return json({ error: `AI endpoint error (${res.status}). ${res.detail.slice(0, 300)}` }, { status: 502 });
 	}
 
-	const data = await res.json().catch(() => null);
-	const content: string = data?.choices?.[0]?.message?.content ?? '';
-	const parsed = extractJson(content);
+	const parsed = extractJson(res.content);
 	if (!parsed || parsed.sentences.length === 0) {
 		return json({ error: 'The model did not return usable JSON. Try a more capable model.' }, { status: 502 });
 	}

@@ -2,22 +2,37 @@
 	import '../app.css';
 	import { page } from '$app/state';
 	import { MODES, modeState, setMode, modeLabel } from '$lib/mode.svelte';
+	import { settings, setActiveDeck } from '$lib/settings.svelte';
 
 	let { children } = $props();
 	const onSettings = $derived(page.url.pathname.startsWith('/settings'));
 	const onAdd = $derived(page.url.pathname.startsWith('/add'));
 	const onHome = $derived(page.url.pathname === '/');
+	const manyDecks = $derived(settings.decks.length > 1);
 
 	let menuOpen = $state(false);
+	let deckOpen = $state(false);
 
 	function choose(id: (typeof MODES)[number]['id']) {
 		setMode(id);
 		menuOpen = false;
 	}
 
+	function chooseDeck(name: string) {
+		setActiveDeck(name);
+		deckOpen = false;
+	}
+
 	$effect(() => {
 		if (!menuOpen) return;
 		const close = () => (menuOpen = false);
+		window.addEventListener('click', close);
+		return () => window.removeEventListener('click', close);
+	});
+
+	$effect(() => {
+		if (!deckOpen) return;
+		const close = () => (deckOpen = false);
 		window.addEventListener('click', close);
 		return () => window.removeEventListener('click', close);
 	});
@@ -27,6 +42,22 @@
 	<header>
 		<a class="brand" href="/" aria-label="Home">Gapfill</a>
 		<nav>
+			{#if onHome && manyDecks}
+				<div class="mode" onclick={(e) => e.stopPropagation()} role="presentation">
+					<button class="modebtn deck" onclick={() => (deckOpen = !deckOpen)} aria-label="Deck">
+						<span class="dico">▤</span><span class="dname">{settings.dbTable}</span><span class="chev" class:open={deckOpen}>▾</span>
+					</button>
+					{#if deckOpen}
+						<div class="menu deckmenu">
+							{#each settings.decks as d}
+								<button class="item" class:on={d === settings.dbTable} onclick={() => chooseDeck(d)}>
+									<span class="ml">{d}</span>
+								</button>
+							{/each}
+						</div>
+					{/if}
+				</div>
+			{/if}
 			{#if onHome}
 				<div class="mode" onclick={(e) => e.stopPropagation()} role="presentation">
 					<button class="modebtn" onclick={() => (menuOpen = !menuOpen)} aria-label="Practice mode">
@@ -100,6 +131,22 @@
 		border: 1.5px solid var(--line);
 		background: var(--panel);
 		white-space: nowrap;
+	}
+	.deck {
+		gap: 6px;
+		max-width: 130px;
+	}
+	.deck .dico {
+		font-size: 12px;
+		color: var(--muted);
+	}
+	.dname {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.deckmenu {
+		width: 180px;
 	}
 	.chev {
 		font-size: 10px;
